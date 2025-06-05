@@ -184,6 +184,9 @@ local function JoinLines()
   if #concat > 0 then
     vim.api.nvim_buf_set_lines(bufnr, ts_line, end_line, false, { joined })
   end
+  -- Add a blank line afterward
+  --TODO: Don't concat the blank line in the first place
+  vim.api.nvim_buf_set_lines(bufnr, ts_line + 1, ts_line + 1, false, { "" })
 end
 
 
