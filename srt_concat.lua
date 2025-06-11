@@ -1,5 +1,4 @@
-vim.keymap.set('n', '<Insert>', 'i', { noremap = true, silent = true })
-
+local M = {}
 
 local timestamp_pattern = "^%d%d:%d%d:%d%d,%d%d%d%s+-->%s+%d%d:%d%d:%d%d,%d%d%d$"
 local single_number_pattern = "^%d+$"
@@ -197,8 +196,11 @@ local function MainLoop()
 
   -- Save number of paragraphs to concat
   local n = vim.v.count1
+  -- We can't merge 1 paragraph, so default count to 2
+  if n == 1 then
+	  n = 2
+  end
 
-  ReplaceEmptySubtitle()
 
   if n < 2 then
     return
@@ -217,4 +219,8 @@ local function MainLoop()
   JoinLines()
 end
 
-vim.keymap.set('n', 'c', MainLoop, { noremap = true, silent = true })
+M.Main = MainLoop
+return M
+
+-- Keybinds to be added to `init.lua` or `init.vim`
+-- vim.keymap.set('n', 'c', MainLoop, { noremap = true, silent = true })
