@@ -2,7 +2,7 @@
 INPUT_MEDIA_PATH = "example.mp4"  # Edit this with actual path
 OUTPUT_SRT_PATH = "output.srt"  # Edit this with actual path
 MODEL_NAME = "medium.en"
-DEVICE = "cpu"
+DEVICE = "cuda"
 BATCH_SIZE = 16
 COMPUTE_TYPE = "float16"
 PUNCTUATION = ",.!?;"
