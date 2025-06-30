@@ -1,51 +1,28 @@
+# Adjustable options for users
+INPUT_MEDIA_PATH = "example.mp4"  # Edit this with actual path
+OUTPUT_SRT_PATH = "output.srt"  # Edit this with actual path
+MODEL_NAME = "medium.en"
+DEVICE = "cpu"
+BATCH_SIZE = 16
+COMPUTE_TYPE = "float16"
+PUNCTUATION = ",.!?;"
+MIN_WORDS_LIMIT = 8
+
 import whisperx
-import gc
 import re
 
+def load_and_transcribe(input_media_path, model_name, device, batch_size, compute_type):
+    model = whisperx.load_model(model_name, device, compute_type=compute_type)
+    audio = whisperx.load_audio(input_media_path)
+    result = model.transcribe(audio, batch_size=batch_size)
+    model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
+    result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
+    return result
 
-# Pattern to match SRT timestamp lines (e.g. "00:00:01,500 --> 00:00:04,800")
-timestamp_pattern = re.compile(r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})")
-
-audio_file = "/content/0Complex.mp4"
-output_path = audio_file[:-4] + ".srt"
-
-model = "medium.en"
-device = "cpu"
-batch_size = 16 # Reduce if low on GPU memory
-compute_type = "int8"
-
-
-# 1. Transcribe with original whisper (batched)
-model = whisperx.load_model(model, device, compute_type=compute_type)
-
-audio = whisperx.load_audio(audio_file)
-result = model.transcribe(audio, batch_size=batch_size)
-
-
-# 2. Align whisper output
-model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
-result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
-
-print(result["segments"]) # after alignment
-
-# delete model if low on GPU resources
-# import gc; import torch; gc.collect(); torch.cuda.empty_cache(); del model_a
-
-"""
-# 3. Assign speaker labels
-diarize_model = whisperx.diarize.DiarizationPipeline(use_auth_token=YOUR_HF_TOKEN, device=device)
-
-# add min/max number of speakers if known
-diarize_segments = diarize_model(audio)
-# diarize_model(audio, min_speakers=min_speakers, max_speakers=max_speakers)
-
-result = whisperx.assign_word_speakers(diarize_segments, result)
-print(diarize_segments)
-print(result["segments"]) # segments are now assigned speaker IDs
-"""
-
-
-def adjust_srt_timestamps(output_path):
+def adjust_srt_timestamps(output_path, timestamp_pattern):
+    """ (Optional)
+    Adjusts SRT timestamps to minimize gaps in time between subtitles.
+    """
     def parse_timestamp(ts):
         h, m, s_ms = ts.split(":")
         s, ms = s_ms.split(",")
@@ -92,46 +69,60 @@ def adjust_srt_timestamps(output_path):
     with open(output_path, "w") as f:
         f.writelines(lines)
 
-def format_time(seconds):
-    # Convert seconds to SRT time format: HH:MM:SS,mmm
-    millisec = int((seconds - int(seconds)) * 1000)
-    seconds = int(seconds)
-    hrs = seconds // 3600
-    mins = (seconds % 3600) // 60
-    sec = seconds % 60
-    return f"{hrs:02d}:{mins:02d}:{sec:02d},{millisec:03d}"
+def write_srt_output(output_path, segments, punctuation, min_words_limit):
+    # Process the subtitles and write to output SRT file
+    def format_time(seconds):
+        # Convert seconds to SRT time format: HH:MM:SS,mmm
+        millisec = int((seconds - int(seconds)) * 1000)
+        seconds = int(seconds)
+        hrs = seconds // 3600
+        mins = (seconds % 3600) // 60
+        sec = seconds % 60
+        return f"{hrs:02d}:{mins:02d}:{sec:02d},{millisec:03d}"
 
+    with open(output_path, "w", encoding="utf-8") as srt_file:
+        my_segment = ""
+        word_cnt = 0
+        start_time = None
+        end_time = None
+        subtitle_index = 1
+        for segment in segments:
+            for word_info in segment["words"]:
+                if word_cnt == 0:
+                    start_time = format_time(word_info["start"])
+                word_text = word_info["word"].strip()
+                my_segment += word_text + " "
+                word_cnt += 1
+                end_time = format_time(word_info["end"])
+                if word_text[-1] in punctuation and word_cnt >= min_words_limit:
+                    srt_file.write(f"{subtitle_index}\n")
+                    srt_file.write(f"{start_time} --> {end_time}\n")
+                    srt_file.write(f"{my_segment}\n\n")
+                    subtitle_index += 1
+                    my_segment = ""
+                    word_cnt = 0
+        # Last segment wouldn't have been added if it didn't end with punctuation
+        if my_segment != "":
+            srt_file.write(f"{subtitle_index}\n")
+            srt_file.write(f"{start_time} --> {end_time}\n")
+            srt_file.write(f"{my_segment}\n\n")
+    print(f"Subtitles written to {output_path}")
 
-punctuation = ",.!?;"  # Breaking punctuation that separates lines
-min_words_limit = 8  # Minimum words before allowing line break
-# Process the
-with open(output_path, "w", encoding="utf-8") as srt_file:
-    my_segment = ""
-    word_cnt = 0
-    start_time = None
-    end_time = None
-    subtitle_index = 1
-    for segment in result["segments"]:
-        for word_info in segment["words"]:
-            if word_cnt == 0:
-                start_time = format_time(word_info["start"])
-            word_text = word_info["word"].strip()
-            my_segment += word_text + " "
-            word_cnt += 1
-            end_time = format_time(word_info["end"])
-            if word_text[-1] in punctuation and word_cnt >= min_words_limit:
-                srt_file.write(f"{subtitle_index}\n")
-                srt_file.write(f"{start_time} --> {end_time}\n")
-                srt_file.write(f"{my_segment}\n\n")
-                subtitle_index += 1
-                my_segment = ""
-                word_cnt = 0
-    # Last segment wouldn't have been added if it didn't end with punctuation
-    if my_segment != "":
-        srt_file.write(f"{subtitle_index}\n")
-        srt_file.write(f"{start_time} --> {end_time}\n")
-        srt_file.write(f"{my_segment}\n\n")
+def main():
+    input_media_path = INPUT_MEDIA_PATH
+    output_srt_path = OUTPUT_SRT_PATH
+    punctuation = PUNCTUATION
+    min_words_limit = MIN_WORDS_LIMIT
+    model_name = MODEL_NAME
+    device = DEVICE
+    batch_size = BATCH_SIZE
+    compute_type = COMPUTE_TYPE
+    timestamp_pattern = re.compile(r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})")
 
-adjust_srt_timestamps(output_path)
+    result = load_and_transcribe(input_media_path, model_name, device, batch_size, compute_type)
+    write_srt_output(output_srt_path, result["segments"], punctuation, min_words_limit)
+    adjust_srt_timestamps(output_srt_path, timestamp_pattern)
 
-print(f"Subtitles written to {output_path}")
+if __name__ == "__main__":
+    main()
+
