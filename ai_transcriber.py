@@ -23,15 +23,6 @@ def load_and_transcribe(input_media_path, model_name, device, batch_size, comput
 
 def write_srt_output(output_path, segments, punctuation, min_words_limit):
     # Process the subtitles and write to output SRT file
-    def format_time(seconds):
-        # Convert seconds to SRT time format: HH:MM:SS,mmm
-        millisec = int((seconds - int(seconds)) * 1000)
-        seconds = int(seconds)
-        hrs = seconds // 3600
-        mins = (seconds % 3600) // 60
-        sec = seconds % 60
-        return f"{hrs:02d}:{mins:02d}:{sec:02d},{millisec:03d}"
-
     with open(output_path, "w", encoding="utf-8") as srt_file:
         my_segment = ""
         word_cnt = 0
@@ -41,11 +32,21 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
         for segment in segments:
             for word_info in segment["words"]:
                 if word_cnt == 0:
-                    start_time = format_time(word_info["start"])
+                    try:
+                        start_time = secs_to_timestamp_str(word_info["start"])
+                    except KeyError:
+                        if start_time is None:
+                            start_time = "0"
+                        else:
+                            # Use the previous end_time as the new start_time
+                            start_time = secs_to_timestamp_str(end_time)
                 word_text = word_info["word"].strip()
                 my_segment += word_text + " "
                 word_cnt += 1
-                end_time = format_time(word_info["end"])
+                try:
+                    end_time = secs_to_timestamp_str(word_info["end"])
+                except KeyError:
+                    end_time = start_time
                 if word_text[-1] in punctuation and word_cnt >= min_words_limit:
                     srt_file.write(f"{subtitle_index}\n")
                     srt_file.write(f"{start_time} --> {end_time}\n")
@@ -64,11 +65,6 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
     """ (Optional)
     Adjusts SRT timestamps to minimize gaps in time between subtitles.
     """
-    def parse_timestamp(ts):
-        h, m, s_ms = ts.split(":")
-        s, ms = s_ms.split(",")
-        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
-
     def format_timestamp(total_seconds):
         h = int(total_seconds // 3600)
         m = int((total_seconds % 3600) // 60)
@@ -85,8 +81,8 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
         match = timestamp_pattern.match(line)
         if match:
             start_str, end_str = match.groups()
-            start_time = parse_timestamp(start_str)
-            end_time = parse_timestamp(end_str)
+            start_time = timestamp_to_secs(start_str)
+            end_time = timestamp_to_secs(end_str)
             timestamps.append((idx, start_time, end_time))
 
     # Process each timestamp line comparing with the next block's start time
@@ -109,6 +105,20 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
 
     with open(output_path, "w") as f:
         f.writelines(lines)
+
+def timestamp_to_secs(ts):
+    h, m, s_ms = ts.split(":")
+    s, ms = s_ms.split(",")
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+def secs_to_timestamp_str(seconds):
+    # Convert seconds to SRT time format: HH:MM:SS,mmm
+    millisec = int((seconds - int(seconds)) * 1000)
+    seconds = int(seconds)
+    hrs = seconds // 3600
+    mins = (seconds % 3600) // 60
+    sec = seconds % 60
+    return f"{hrs:02d}:{mins:02d}:{sec:02d},{millisec:03d}"
 
 def main():
     input_media_path = INPUT_MEDIA_PATH
