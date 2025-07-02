@@ -7,12 +7,17 @@ MODEL_NAME = "medium.en"
 DEVICE = "cpu"
 BATCH_SIZE = 16
 COMPUTE_TYPE = "int8"
-PUNCTUATION = ",.!?;"
-MIN_WORDS_LIMIT = 8
+PUNCTUATION = ",.!?;"  # Breaking punctuation for sentence breaks
+MIN_WORDS_LIMIT = 8  # Minimum number of words per SRT segment
+MAX_WORDS_LIMIT = 79  # Maximum number of words per SRT segment
 
 import whisperx
 import re
 import ast
+
+
+TIMESTAMP_PATTERN = re.compile(r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})")
+
 
 def load_and_transcribe(input_media_path, model_name, device, batch_size, compute_type):
     model = whisperx.load_model(model_name, device, compute_type=compute_type)
@@ -49,6 +54,15 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
                 except KeyError:
                     end_time = start_time
                 if word_text[-1] in punctuation and word_cnt >= min_words_limit:
+                    # Break if punctuation reached and minimum words reached
+                    srt_file.write(f"{subtitle_index}\n")
+                    srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
+                    srt_file.write(f"{my_segment}\n\n")
+                    subtitle_index += 1
+                    my_segment = ""
+                    word_cnt = 0
+                if word_cnt >= MAX_WORDS_LIMIT:
+                    # Force break if maximum words reached
                     srt_file.write(f"{subtitle_index}\n")
                     srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
                     srt_file.write(f"{my_segment}\n\n")
@@ -62,7 +76,7 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
             srt_file.write(f"{my_segment}\n\n")
     print(f"Subtitles written to {output_path}")
 
-def adjust_srt_timestamps(output_path, timestamp_pattern):
+def adjust_srt_timestamps(output_path):
     """ (Optional)
     Adjusts SRT timestamps to minimize gaps in time between subtitles.
     """
@@ -72,7 +86,7 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
     # Gather the indices and parsed timestamps for lines that match the timestamp pattern
     timestamps = []  # each element is (line_index, start_time, end_time)
     for idx, line in enumerate(lines):
-        match = timestamp_pattern.match(line)
+        match = TIMESTAMP_PATTERN.match(line)
         if match:
             start_str, end_str = match.groups()
             start_time = float(timestamp_to_secs(start_str))
@@ -100,13 +114,20 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
     with open(output_path, "w") as f:
         f.writelines(lines)
 
-def timestamp_to_secs(ts):
-    h, m, s_ms = ts.split(":")
+def timestamp_to_secs(timestamp):
+    """
+    :param timestamp: String in SRT time format: HH:MM:SS,mmm
+    :return: Float of equivalent seconds
+    """
+    h, m, s_ms = timestamp.split(":")
     s, ms = s_ms.split(",")
     return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
 def secs_to_timestamp(seconds: float) -> str:
-    # Convert seconds (float) to SRT time format: HH:MM:SS,mmm
+    """
+    :param seconds: Float representing seconds
+    :return: String in SRT time format: HH:MM:SS,mmm
+    """
     millisec = int(round((seconds - int(seconds)) * 1000))
     seconds = int(seconds)
     hrs = seconds // 3600
@@ -124,7 +145,6 @@ def main():
     device = DEVICE
     batch_size = BATCH_SIZE
     compute_type = COMPUTE_TYPE
-    timestamp_pattern = re.compile(r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})")
     # If segments_file_path is provided, read segments from it and skip transcription
     if segments_file_path:
         with open(segments_file_path, "r", encoding="utf-8") as f:
@@ -139,8 +159,7 @@ def main():
         results = load_and_transcribe(input_media_path, model_name, device, batch_size, compute_type)
         segments = results["segments"]
     write_srt_output(output_srt_path, segments, punctuation, min_words_limit)
-    adjust_srt_timestamps(output_srt_path, timestamp_pattern)
+    adjust_srt_timestamps(output_srt_path)
 
 if __name__ == "__main__":
     main()
-
