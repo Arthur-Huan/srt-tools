@@ -12,6 +12,7 @@ MIN_WORDS_LIMIT = 8
 
 import whisperx
 import re
+import ast
 
 def load_and_transcribe(input_media_path, model_name, device, batch_size, compute_type):
     model = whisperx.load_model(model_name, device, compute_type=compute_type)
@@ -134,7 +135,13 @@ def main():
     # If segments_file_path is provided, read segments from it and skip transcription
     if segments_file_path:
         with open(segments_file_path, "r", encoding="utf-8") as f:
-            segments = [line.strip() for line in f if line.strip()]
+            line = f.readline().strip()
+            if line:
+                # Remove all ', 'score': ...)' patterns (non-greedy, up to next ) )
+                line_clean = re.sub(r", 'score': [^)]*\)", "", line)
+                segments = ast.literal_eval(line_clean)
+            else:
+                segments = []
     else:
         results = load_and_transcribe(input_media_path, model_name, device, batch_size, compute_type)
         segments = results["segments"]
