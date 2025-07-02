@@ -34,23 +34,23 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
             for word_info in segment["words"]:
                 if word_cnt == 0:
                     try:
-                        start_time = secs_to_timestamp_str(word_info["start"])
+                        start_time = float(word_info["start"])
                     except KeyError:
                         if start_time is None:
-                            start_time = "0"
+                            start_time = 0.0
                         else:
                             # Use the previous end_time as the new start_time
-                            start_time = secs_to_timestamp_str(end_time)
+                            start_time = float(end_time) if end_time is not None else 0.0
                 word_text = word_info["word"].strip()
                 my_segment += word_text + " "
                 word_cnt += 1
                 try:
-                    end_time = secs_to_timestamp_str(word_info["end"])
+                    end_time = float(word_info["end"])
                 except KeyError:
                     end_time = start_time
                 if word_text[-1] in punctuation and word_cnt >= min_words_limit:
                     srt_file.write(f"{subtitle_index}\n")
-                    srt_file.write(f"{start_time} --> {end_time}\n")
+                    srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
                     srt_file.write(f"{my_segment}\n\n")
                     subtitle_index += 1
                     my_segment = ""
@@ -58,7 +58,7 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
         # Last segment wouldn't have been added if it didn't end with punctuation
         if my_segment != "":
             srt_file.write(f"{subtitle_index}\n")
-            srt_file.write(f"{start_time} --> {end_time}\n")
+            srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
             srt_file.write(f"{my_segment}\n\n")
     print(f"Subtitles written to {output_path}")
 
@@ -66,13 +66,6 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
     """ (Optional)
     Adjusts SRT timestamps to minimize gaps in time between subtitles.
     """
-    def format_timestamp(total_seconds):
-        h = int(total_seconds // 3600)
-        m = int((total_seconds % 3600) // 60)
-        s = int(total_seconds % 60)
-        ms = int(round((total_seconds - int(total_seconds)) * 1000))
-        return f"{h:02}:{m:02}:{s:02},{ms:03}"
-
     with open(output_path, "r") as f:
         lines = f.readlines()
 
@@ -82,8 +75,8 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
         match = timestamp_pattern.match(line)
         if match:
             start_str, end_str = match.groups()
-            start_time = timestamp_to_secs(start_str)
-            end_time = timestamp_to_secs(end_str)
+            start_time = float(timestamp_to_secs(start_str))
+            end_time = float(timestamp_to_secs(end_str))
             timestamps.append((idx, start_time, end_time))
 
     # Process each timestamp line comparing with the next block's start time
@@ -101,7 +94,7 @@ def adjust_srt_timestamps(output_path, timestamp_pattern):
 
         # Ensure new_end doesn't fall before the start time
         if new_end > start_time:
-            new_timestamp_line = f"{format_timestamp(start_time)} --> {format_timestamp(new_end)}\n"
+            new_timestamp_line = f"{secs_to_timestamp(start_time)} --> {secs_to_timestamp(new_end)}\n"
             lines[idx] = new_timestamp_line
 
     with open(output_path, "w") as f:
@@ -112,9 +105,9 @@ def timestamp_to_secs(ts):
     s, ms = s_ms.split(",")
     return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
-def secs_to_timestamp_str(seconds):
-    # Convert seconds to SRT time format: HH:MM:SS,mmm
-    millisec = int((seconds - int(seconds)) * 1000)
+def secs_to_timestamp(seconds: float) -> str:
+    # Convert seconds (float) to SRT time format: HH:MM:SS,mmm
+    millisec = int(round((seconds - int(seconds)) * 1000))
     seconds = int(seconds)
     hrs = seconds // 3600
     mins = (seconds % 3600) // 60
