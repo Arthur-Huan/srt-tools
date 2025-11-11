@@ -27,13 +27,14 @@ def load_and_transcribe(input_media_path, model_name, device, batch_size, comput
     result = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
     return result
 
+
 def write_srt_output(output_path, segments, punctuation, min_words_limit):
     # Process the subtitles and write to output SRT file
     with open(output_path, "w", encoding="utf-8") as srt_file:
         my_segment = ""
         word_cnt = 0
-        start_time = None
-        end_time = None
+        start_time = 0.0
+        end_time = 0.0
         subtitle_index = 1
         for segment in segments:
             for word_info in segment["words"]:
@@ -41,28 +42,21 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
                     try:
                         start_time = float(word_info["start"])
                     except KeyError:
-                        if start_time is None:
-                            start_time = 0.0
-                        else:
-                            # Use the previous end_time as the new start_time
-                            start_time = float(end_time) if end_time is not None else 0.0
+                          # Use the previous end_time as the new start_time
+                          start_time = end_time
                 word_text = word_info["word"].strip()
                 my_segment += word_text + " "
                 word_cnt += 1
                 try:
                     end_time = float(word_info["end"])
                 except KeyError:
-                    end_time = start_time
+                    # Whisper might fail to determine end time (and start time)
+                    # Effectively give this word no time, relying on its context
+                    # If next word has time, then this word's end time will be overwritten anyway
+                    # If this is the end of the line, then the correct end time
+                    # will be identified from the next line when `adjust_srt_timestamps` is run
+                    pass
                 if word_text[-1] in punctuation and word_cnt >= min_words_limit:
-                    # Break if punctuation reached and minimum words reached
-                    srt_file.write(f"{subtitle_index}\n")
-                    srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
-                    srt_file.write(f"{my_segment}\n\n")
-                    subtitle_index += 1
-                    my_segment = ""
-                    word_cnt = 0
-                if word_cnt >= MAX_WORDS_LIMIT:
-                    # Force break if maximum words reached
                     srt_file.write(f"{subtitle_index}\n")
                     srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
                     srt_file.write(f"{my_segment}\n\n")
@@ -74,7 +68,11 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
             srt_file.write(f"{subtitle_index}\n")
             srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
             srt_file.write(f"{my_segment}\n\n")
+
+        adjust_srt_timestamps(output_path)
+
     print(f"Subtitles written to {output_path}")
+
 
 def adjust_srt_timestamps(output_path):
     """ (Optional)
@@ -135,6 +133,7 @@ def secs_to_timestamp(seconds: float) -> str:
     sec = seconds % 60
     return f"{hrs:02d}:{mins:02d}:{sec:02d},{millisec:03d}"
 
+
 def main():
     input_media_path = INPUT_MEDIA_PATH
     output_srt_path = OUTPUT_SRT_PATH
@@ -145,6 +144,7 @@ def main():
     device = DEVICE
     batch_size = BATCH_SIZE
     compute_type = COMPUTE_TYPE
+
     # If segments_file_path is provided, read segments from it and skip transcription
     if segments_file_path:
         with open(segments_file_path, "r", encoding="utf-8") as f:
@@ -159,7 +159,7 @@ def main():
         results = load_and_transcribe(input_media_path, model_name, device, batch_size, compute_type)
         segments = results["segments"]
     write_srt_output(output_srt_path, segments, punctuation, min_words_limit)
-    adjust_srt_timestamps(output_srt_path)
+
 
 if __name__ == "__main__":
     main()
