@@ -1,19 +1,26 @@
-# Adjustable options for users
-INPUT_MEDIA_PATH = "example.mp4"  # Edit this with actual path
-OUTPUT_SRT_PATH = "output.srt"  # Edit this with actual path
-SEGMENTS_FILE_PATH = None  # Optional, set here to skip the AI transcription step
-
-MODEL_NAME = "medium.en"
-DEVICE = "cpu"
-BATCH_SIZE = 16
-COMPUTE_TYPE = "int8"
-PUNCTUATION = ",.!?;"  # Breaking punctuation for sentence breaks
-MIN_WORDS_LIMIT = 8  # Minimum number of words per SRT segment
-MAX_WORDS_LIMIT = 79  # Maximum number of words per SRT segment
-
 import whisperx
 import re
 import ast
+import json
+
+from utils.time_conversion import secs_to_timestamp
+from utils.path_check import solve_path
+
+
+# Adjustable options for users
+
+INPUT_MEDIA_PATH = "/home/arthur/source.mp4"  # Edit this with actual path
+OUTPUT_SRT_PATH = "output/output.srt"  # Edit this with actual path
+SEGMENTS_OUTPUT_PATH = "output/segments.txt"
+SEGMENTS_FILE_PATH = "output/segments.txt"  # Optional, set here to skip the AI transcription step
+
+MODEL_NAME = "medium"
+DEVICE = "cpu"
+BATCH_SIZE = 16
+COMPUTE_TYPE = "int8"
+PUNCTUATION = ",.!?;，。！？；…"  # Breaking punctuation for sentence breaks
+MIN_WORDS_LIMIT = 8  # Minimum number of words per SRT segment
+MAX_WORDS_LIMIT = 32  # Maximum number of words per SRT segment
 
 
 TIMESTAMP_PATTERN = re.compile(r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})")
@@ -29,6 +36,10 @@ def load_and_transcribe(input_media_path, model_name, device, batch_size, comput
 
 
 def write_srt_output(output_path, segments, punctuation, min_words_limit):
+    # Log the raw output
+    print(segments)
+    with open(SEGMENTS_OUTPUT_PATH, "w") as f:
+        json.dump(segments, f, ensure_ascii=False, indent=2)
     # Process the subtitles and write to output SRT file
     with open(output_path, "w", encoding="utf-8") as srt_file:
         my_segment = ""
@@ -69,69 +80,19 @@ def write_srt_output(output_path, segments, punctuation, min_words_limit):
             srt_file.write(f"{secs_to_timestamp(start_time or 0.0)} --> {secs_to_timestamp(end_time or 0.0)}\n")
             srt_file.write(f"{my_segment}\n\n")
 
-        adjust_srt_timestamps(output_path)
-
     print(f"Subtitles written to {output_path}")
 
 
-def adjust_srt_timestamps(output_path):
-    """ (Optional)
-    Adjusts SRT timestamps to minimize gaps in time between subtitles.
-    """
-    with open(output_path, "r") as f:
-        lines = f.readlines()
-
-    # Gather the indices and parsed timestamps for lines that match the timestamp pattern
-    timestamps = []  # each element is (line_index, start_time, end_time)
-    for idx, line in enumerate(lines):
-        match = TIMESTAMP_PATTERN.match(line)
-        if match:
-            start_str, end_str = match.groups()
-            start_time = float(timestamp_to_secs(start_str))
-            end_time = float(timestamp_to_secs(end_str))
-            timestamps.append((idx, start_time, end_time))
-
-    # Process each timestamp line comparing with the next block's start time
-    for i in range(len(timestamps) - 1):
-        idx, start_time, end_time = timestamps[i]
-        _, next_start, _ = timestamps[i + 1]
-
-        gap = next_start - end_time
-        new_end = end_time  # default: no change
-
-        if gap > 2.0:
-            new_end = next_start - 0.2
-        elif 0.1 < gap <= 2.0:
-            new_end = next_start - 0.1
-
-        # Ensure new_end doesn't fall before the start time
-        if new_end > start_time:
-            new_timestamp_line = f"{secs_to_timestamp(start_time)} --> {secs_to_timestamp(new_end)}\n"
-            lines[idx] = new_timestamp_line
-
-    with open(output_path, "w") as f:
-        f.writelines(lines)
-
-def timestamp_to_secs(timestamp):
-    """
-    :param timestamp: String in SRT time format: HH:MM:SS,mmm
-    :return: Float of equivalent seconds
-    """
-    h, m, s_ms = timestamp.split(":")
-    s, ms = s_ms.split(",")
-    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
-
-def secs_to_timestamp(seconds: float) -> str:
-    """
-    :param seconds: Float representing seconds
-    :return: String in SRT time format: HH:MM:SS,mmm
-    """
-    millisec = int(round((seconds - int(seconds)) * 1000))
-    seconds = int(seconds)
-    hrs = seconds // 3600
-    mins = (seconds % 3600) // 60
-    sec = seconds % 60
-    return f"{hrs:02d}:{mins:02d}:{sec:02d},{millisec:03d}"
+def write_plain_srt_output(output_path, segments):
+    with open(output_path, "w", encoding="utf-8") as srt_file:
+        for idx, segment in enumerate(segments, start=1):
+            start_time = float(segment["start"])
+            end_time = float(segment["end"])
+            text = segment["text"].strip()
+            srt_file.write(f"{idx}\n")
+            srt_file.write(f"{secs_to_timestamp(start_time)} --> {secs_to_timestamp(end_time)}\n")
+            srt_file.write(f"{text}\n\n")
+    print(f"Plain subtitles written to {output_path}")
 
 
 def main():
@@ -145,14 +106,21 @@ def main():
     batch_size = BATCH_SIZE
     compute_type = COMPUTE_TYPE
 
+    for path in (output_srt_path):
+        solve_path(path)
+
     # If segments_file_path is provided, read segments from it and skip transcription
     if segments_file_path:
         with open(segments_file_path, "r", encoding="utf-8") as f:
-            line = f.readline().strip()
-            if line:
-                # Remove all ', 'score': ...)' patterns (non-greedy, up to next ) )
-                line_clean = re.sub(r", 'score': [^)]*\)", "", line)
-                segments = ast.literal_eval(line_clean)
+            content = f.read().strip()
+            if content:
+                # Remove all ", 'score': ...)" patterns (non-greedy, up to next ')')
+                content_clean = re.sub(r", 'score': [^)]*\)", ")", content)
+                try:
+                    segments = ast.literal_eval(content_clean)
+                except Exception as e:
+                    print(f"Error parsing segments file: {e}")
+                    segments = []
             else:
                 segments = []
     else:
